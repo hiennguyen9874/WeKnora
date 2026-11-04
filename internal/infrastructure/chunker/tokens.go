@@ -13,10 +13,11 @@ import (
 
 // Language identifiers used by the token estimator and the heuristic splitter.
 const (
-	LangEnglish = "en"
-	LangGerman  = "de"
-	LangChinese = "zh"
-	LangMixed   = "mixed"
+	LangEnglish    = "en"
+	LangGerman     = "de"
+	LangChinese    = "zh"
+	LangVietnamese = "vi"
+	LangMixed      = "mixed"
 )
 
 // charsPerToken holds approximate chars/token ratios per language.
@@ -25,7 +26,10 @@ var charsPerToken = map[string]float64{
 	LangEnglish: 4.0,
 	LangGerman:  4.5,
 	LangChinese: 1.7,
-	LangMixed:   3.0,
+	// Qwen3-VL-Embedding-2B on Vietnamese legal text averages 3.18 chars/token;
+	// 2.5 is the per-chunk p10, so tables and numbers are not under-counted.
+	LangVietnamese: 2.5,
+	LangMixed:      3.0,
 }
 
 // ApproxTokenCount returns a conservative token estimate for s in the given
@@ -58,18 +62,21 @@ func ApproxTokenCountFromRuneLen(runeLen int, lang string) int {
 }
 
 // DetectLanguage returns a coarse language label by counting CJK runes vs.
-// Latin runes. The result is one of LangChinese, LangGerman, LangEnglish or
-// LangMixed. Detection is cheap and meant only for heuristic dispatch — it
-// is NOT a replacement for proper language identification.
+// Latin runes. The result is one of LangChinese, LangVietnamese, LangGerman,
+// LangEnglish or LangMixed. Detection is cheap and meant only for heuristic
+// dispatch — it is NOT a replacement for proper language identification.
 func DetectLanguage(s string) string {
 	if s == "" {
 		return LangMixed
 	}
-	var cjk, latin, umlaut int
+	var cjk, latin, umlaut, vietnamese int
 	for _, r := range s {
 		switch {
 		case unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r):
 			cjk++
+		case isVietnameseLetter(r):
+			vietnamese++
+			latin++
 		case isGermanUmlaut(r):
 			umlaut++
 			latin++
@@ -90,10 +97,26 @@ func DetectLanguage(s string) string {
 	if cjkRatio > 0.3 {
 		return LangChinese
 	}
+	// Vietnamese prose has ~20% such letters; a Vietnamese name in English text far fewer.
+	if vietnamese*10 >= latin {
+		return LangVietnamese
+	}
 	if umlaut > 0 || hasGermanWords(s) {
 		return LangGerman
 	}
 	return LangEnglish
+}
+
+// isVietnameseLetter reports precomposed letters that only Vietnamese uses:
+// ă, đ, ĩ, ũ, ơ, ư and the vowels with a hook, dot below or stacked tone
+// (U+1EA0..U+1EF9). Accents shared with French or German (é, à, ô, ü) are
+// excluded so those languages are not mistaken for Vietnamese.
+func isVietnameseLetter(r rune) bool {
+	switch r {
+	case 'ă', 'Ă', 'đ', 'Đ', 'ĩ', 'Ĩ', 'ũ', 'Ũ', 'ơ', 'Ơ', 'ư', 'Ư':
+		return true
+	}
+	return r >= 0x1EA0 && r <= 0x1EF9
 }
 
 func isGermanUmlaut(r rune) bool {

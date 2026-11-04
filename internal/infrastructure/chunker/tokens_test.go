@@ -1,6 +1,10 @@
 package chunker
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestApproxTokenCount_English(t *testing.T) {
 	got := ApproxTokenCount("The quick brown fox jumps over the lazy dog.", LangEnglish)
@@ -60,6 +64,43 @@ func TestDetectLanguage_Mixed(t *testing.T) {
 	got := DetectLanguage("This 这是 mixed 测试 content with 多语言 inside")
 	if got != LangMixed {
 		t.Errorf("expected Mixed, got %s", got)
+	}
+}
+
+func TestDetectLanguage_Vietnamese(t *testing.T) {
+	cases := []string{
+		"Điều 1. Phạm vi điều chỉnh\n\nNghị định này quy định về hoạt động kinh doanh vàng.",
+		"CHƯƠNG II QUẢN LÝ HOẠT ĐỘNG KINH DOANH VÀNG",
+		"Bảo hiểm xã hội là sự bảo đảm thay thế hoặc bù đắp một phần thu nhập của người lao động.",
+	}
+	for _, s := range cases {
+		if got := DetectLanguage(s); got != LangVietnamese {
+			t.Errorf("DetectLanguage(%q) = %s, want %s", s, got, LangVietnamese)
+		}
+	}
+}
+
+// A Vietnamese name or a French accent inside English text must not flip it to Vietnamese.
+func TestDetectLanguage_EnglishWithVietnameseName(t *testing.T) {
+	cases := []string{
+		"Nguyễn Văn An is the chief executive of the company and lives in Hanoi with his family.",
+		"The café served a crème brûlée to every guest at the résumé workshop.",
+	}
+	for _, s := range cases {
+		if got := DetectLanguage(s); got != LangEnglish {
+			t.Errorf("DetectLanguage(%q) = %s, want %s", s, got, LangEnglish)
+		}
+	}
+}
+
+func TestApproxTokenCount_Vietnamese(t *testing.T) {
+	// 100 runes at the measured 2.5 chars/token (Qwen3-VL-Embedding-2B) = 40 tokens.
+	s := strings.Repeat("Điều 1. ", 12) + "Phạm"
+	if n := utf8.RuneCountInString(s); n != 100 {
+		t.Fatalf("fixture has %d runes, want 100", n)
+	}
+	if got := ApproxTokenCount(s, LangVietnamese); got != 40 {
+		t.Errorf("Vietnamese token estimate: got %d, want 40", got)
 	}
 }
 

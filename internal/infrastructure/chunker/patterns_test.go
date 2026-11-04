@@ -1,6 +1,9 @@
 package chunker
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestMarkdownHeadingPattern_BasicLevels(t *testing.T) {
 	cases := []struct {
@@ -173,6 +176,9 @@ func TestSentenceSeparators(t *testing.T) {
 	}
 	if got := SentenceSeparators(LangEnglish); got[0] != ". " {
 		t.Errorf("English should start with '. ', got %v", got)
+	}
+	if got := SentenceSeparators(LangVietnamese); !slices.Equal(got, SentenceSeparators(LangEnglish)) {
+		t.Errorf("Vietnamese should use the Latin sentence separators, got %v", got)
 	}
 	if got := SentenceSeparators("xx"); len(got) < 5 {
 		t.Errorf("Unknown lang should return mixed (>=5 separators), got %v", got)

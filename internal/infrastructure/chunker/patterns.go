@@ -65,7 +65,7 @@ func SentenceSeparators(lang string) []string {
 	switch lang {
 	case LangChinese:
 		return []string{"。", "！", "？", "；", "\n"}
-	case LangGerman, LangEnglish:
+	case LangGerman, LangEnglish, LangVietnamese:
 		return []string{". ", "! ", "? ", "; ", "\n"}
 	default:
 		return []string{"。", "！", "？", "；", ". ", "! ", "? ", "; ", "\n"}

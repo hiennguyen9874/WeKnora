@@ -193,9 +193,19 @@ func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
 		cfg.ChunkOverlap = DefaultChunkOverlap
 	}
 	if len(cfg.Separators) == 0 {
-		cfg.Separators = []string{"\n\n", "\n", "。"}
+		cfg.Separators = defaultSeparators(cfg.Languages)
 	}
 	return cfg
+}
+
+// defaultSeparators returns the separators used when none are configured.
+// Vietnamese adds the Latin sentence and clause breaks; other languages keep
+// the original CJK-oriented default.
+func defaultSeparators(langs []string) []string {
+	if len(langs) > 0 && langs[0] == LangVietnamese {
+		return []string{"\n\n", "\n", ". ", "; "}
+	}
+	return []string{"\n\n", "\n", "。"}
 }
 
 // NormalizeLineEndings canonicalizes text before chunking. Browser textareas
@@ -326,7 +336,7 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 		cfg.ChunkOverlap = DefaultChunkOverlap
 	}
 	if len(cfg.Separators) == 0 {
-		cfg.Separators = []string{"\n\n", "\n", "。"}
+		cfg.Separators = defaultSeparators(cfg.Languages)
 	}
 	if cfg.TokenLimit > 0 {
 		lang := LangMixed
