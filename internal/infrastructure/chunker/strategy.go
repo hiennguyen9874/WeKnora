@@ -166,7 +166,12 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
+		subs := Split(parent.Content, childCfg)
+		crumbs := parentContentBreadcrumbs(parent)
+		for i := range subs {
+			subs[i].ContextHeader = breadcrumbAtOffset(crumbs, subs[i].Start, parent.ContextHeader)
+		}
+		subs = mapChildrenToSource(parent, subs)
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -175,7 +180,6 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 		}
 		for _, sub := range subs {
 			sub.Seq = childSeq
-			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++
 		}
@@ -250,28 +254,18 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 	return
 }
 
-// mergeBreadcrumbs combines the parent and child heading breadcrumbs into a
-// single ContextHeader. When the child re-runs heading detection on parent
-// content, its first breadcrumb line typically duplicates the parent's last
-// line (the parent's leading heading sits at the top of the child's input);
-// drop that duplicate so the embedding context isn't redundant.
-func mergeBreadcrumbs(parent, child string) string {
-	if parent == "" {
-		return child
+// parentContentBreadcrumbs returns, for every heading inside the parent's
+// content, the breadcrumb in effect from that heading on, seeded with the
+// parent's own breadcrumb. A child's breadcrumb is the one in effect at its
+// start: a parent that coalesced several short sections (e.g. Điều 1 and
+// Điều 2 under one Chương) only carries their common prefix, but each child
+// still names the section it sits in.
+func parentContentBreadcrumbs(parent Chunk) []sectionBreadcrumb {
+	var seed HeadingHierarchy
+	for _, line := range strings.Split(parent.ContextHeader, "\n") {
+		seed.Observe(line)
 	}
-	if child == "" {
-		return parent
-	}
-	parentLines := strings.Split(parent, "\n")
-	childLines := strings.Split(child, "\n")
-	if len(parentLines) > 0 && len(childLines) > 0 &&
-		strings.TrimSpace(parentLines[len(parentLines)-1]) == strings.TrimSpace(childLines[0]) {
-		childLines = childLines[1:]
-	}
-	if len(childLines) == 0 {
-		return parent
-	}
-	return parent + "\n" + strings.Join(childLines, "\n")
+	return sectionBreadcrumbs([]rune(parent.Content), 0, seed)
 }
 
 // resolveChainWithProfile returns the strategy chain to attempt and, when

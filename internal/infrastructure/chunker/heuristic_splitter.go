@@ -120,6 +120,7 @@ func findHeuristicBoundaries(text string, langs []string) []boundary {
 	// Per-line patterns walk the text once, line by line.
 	lines := strings.Split(text, "\n")
 	chapterPatterns := ChapterPatternsForLangs(langs)
+	numberedPattern := NumberedSectionPatternForLangs(langs)
 	pos := 0
 	inFence := false
 	for i, line := range lines {
@@ -136,7 +137,7 @@ func findHeuristicBoundaries(text string, langs []string) []boundary {
 					break
 				}
 			}
-			if !added && NumberedSectionPattern.MatchString(line) {
+			if !added && numberedPattern.MatchString(line) {
 				bounds = append(bounds, boundary{runeStart: runeStart, priority: PrioNumberedHead})
 				added = true
 			}

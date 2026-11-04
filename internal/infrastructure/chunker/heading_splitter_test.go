@@ -3,6 +3,7 @@ package chunker
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSplitByHeadings_BasicSections(t *testing.T) {
@@ -358,5 +359,109 @@ func TestSplitByHeadings_DeepSubHeadingInLargeSection(t *testing.T) {
 	}
 	if !strings.Contains(marker.ContextHeader, "## 5 Classification") {
 		t.Errorf("marker chunk lost its section heading in the breadcrumb:\nContextHeader=%q", marker.ContextHeader)
+	}
+}
+
+// vietnameseLawDoc mimics PaddleOCR-VL output for a Vietnamese decree: some
+// Chương/Điều lines come out as `##` headings, others as plain lines, Khoản
+// are "1."/"2." lines, the Chương title sits on its own all-caps line, a
+// page footer survives, and Điều 3 has a title longer than a child chunk.
+var vietnameseLawDoc = "## NGHỊ ĐỊNH\nVề quản lý hoạt động kinh doanh vàng\n\n" +
+	"## Chương I NHỮNG QUY ĐỊNH CHUNG\n\n" +
+	"Điều 1. Phạm vi điều chỉnh\n" +
+	"Nghị định này quy định về hoạt động kinh doanh vàng và quản lý nhà nước đối với hoạt động kinh doanh vàng. MARKER_D1 thuộc Điều 1.\n\n" +
+	"## Điều 2. Đối tượng áp dụng\n" +
+	"1. Tổ chức tín dụng, chi nhánh ngân hàng nước ngoài được phép kinh doanh vàng theo quy định.\n" +
+	"2. Doanh nghiệp kinh doanh vàng và các tổ chức, cá nhân có liên quan đến hoạt động kinh doanh vàng. MARKER_D2 thuộc Điều 2.\n\n" +
+	"Trang 3/10\n\n" +
+	"Chương II\nHOẠT ĐỘNG SẢN XUẤT, MUA, BÁN VÀNG MIẾNG\n\n" +
+	"Mục 1. MUA, BÁN VÀNG MIẾNG\n\n" +
+	"Điều 3. Điều kiện cấp Giấy phép kinh doanh mua, bán vàng miếng đối với tổ chức tín dụng và doanh nghiệp, bao gồm cả các trường hợp được sửa đổi, bổ sung theo quy định tại Nghị định số 24/2012/NĐ-CP và Nghị định số 232/2025/NĐ-CP của Chính phủ\n" +
+	"1. Doanh nghiệp được Ngân hàng Nhà nước xem xét cấp Giấy phép kinh doanh mua, bán vàng miếng khi đáp ứng đủ các điều kiện về vốn điều lệ.\n" +
+	"2. Tổ chức tín dụng được Ngân hàng Nhà nước xem xét cấp Giấy phép kinh doanh mua, bán vàng miếng khi có vốn điều lệ từ ba nghìn tỷ đồng trở lên.\n" +
+	"3. Có mạng lưới chi nhánh tại các tỉnh, thành phố trực thuộc trung ương theo quy định của Ngân hàng Nhà nước. MARKER_D3 thuộc Điều 3.\n\n" +
+	"Mục 2. XUẤT KHẨU, NHẬP KHẨU VÀNG\n\n" +
+	"## Điều 4. Xuất khẩu, nhập khẩu vàng\n" +
+	"1. Ngân hàng Nhà nước cấp giấy phép xuất khẩu, nhập khẩu vàng nguyên liệu cho doanh nghiệp sản xuất vàng trang sức, mỹ nghệ.\n" +
+	"2. Doanh nghiệp xuất khẩu vàng nguyên liệu phải đáp ứng các điều kiện theo quy định của pháp luật. MARKER_D4 thuộc Điều 4.\n"
+
+// TestSplitParentChild_VietnameseLegalStructure runs the ingestion path
+// (auto strategy, parent-child) on a Vietnamese decree. Parents must start at
+// a Chương/Mục/Điều boundary, never at a Khoản; every child carries its
+// Chương and Điều in the breadcrumb; and the long Điều 3 heading line is not
+// cut across child chunks.
+func TestSplitParentChild_VietnameseLegalStructure(t *testing.T) {
+	base := NormalizeSplitterConfig(SplitterConfig{
+		Strategy:  StrategyAuto,
+		Languages: []string{LangVietnamese},
+	})
+	parentCfg, childCfg := DeriveParentChildConfigs(base, 700, 200)
+	res := SplitParentChild(vietnameseLawDoc, parentCfg, childCfg)
+	if len(res.Parents) < 3 {
+		t.Fatalf("expected the decree to split into ≥3 parents, got %d", len(res.Parents))
+	}
+
+	for i, p := range res.Parents {
+		first := strings.SplitN(strings.TrimSpace(p.Content), "\n", 2)[0]
+		if !MarkdownHeadingPattern.MatchString(first) && !VietnameseChapterPattern.MatchString(first) {
+			t.Errorf("parent %d starts mid-article at %q", i, first)
+		}
+	}
+
+	// The breadcrumb is the heading path at the child's start: it must name
+	// the enclosing Chương/Mục, and the Điều unless the child itself opens
+	// with that Điều's heading.
+	type want struct {
+		ancestors []string
+		dieu      string
+	}
+	wantHeader := map[string]want{
+		"MARKER_D1": {[]string{"Chương I"}, "Điều 1. Phạm vi điều chỉnh"},
+		"MARKER_D2": {[]string{"Chương I"}, "Điều 2. Đối tượng áp dụng"},
+		"MARKER_D3": {[]string{"Chương II", "Mục 1. MUA, BÁN VÀNG MIẾNG"}, "Điều 3. Điều kiện cấp Giấy phép"},
+		"MARKER_D4": {[]string{"Chương II", "Mục 2. XUẤT KHẨU, NHẬP KHẨU VÀNG"}, "Điều 4. Xuất khẩu, nhập khẩu vàng"},
+	}
+	for marker, w := range wantHeader {
+		found := false
+		for _, c := range res.Children {
+			if !strings.Contains(c.Content, marker) {
+				continue
+			}
+			found = true
+			for _, a := range w.ancestors {
+				if !strings.Contains(c.ContextHeader, a) {
+					t.Errorf("child with %s: breadcrumb lacks %q:\n%s", marker, a, c.ContextHeader)
+				}
+			}
+			if !strings.Contains(c.ContextHeader, w.dieu) && !strings.Contains(c.Content, w.dieu) {
+				t.Errorf("child with %s names %q in neither breadcrumb nor content:\n%s", marker, w.dieu, c.ContextHeader)
+			}
+		}
+		if !found {
+			t.Errorf("no child contains %s", marker)
+		}
+	}
+
+	for i, c := range res.Children {
+		for _, line := range strings.Split(c.ContextHeader, "\n") {
+			title := strings.TrimLeft(line, "# ")
+			if title != "" && title[0] >= '0' && title[0] <= '9' {
+				t.Errorf("child %d: Khoản line %q used as a heading", i, line)
+			}
+		}
+	}
+
+	longHeading := strings.SplitN(vietnameseLawDoc[strings.Index(vietnameseLawDoc, "Điều 3."):], "\n", 2)[0]
+	if utf8.RuneCountInString(longHeading) <= childCfg.ChunkSize {
+		t.Fatalf("fixture: Điều 3 heading (%d runes) must exceed the child size %d", utf8.RuneCountInString(longHeading), childCfg.ChunkSize)
+	}
+	whole := false
+	for _, c := range res.Children {
+		if strings.Contains(c.Content, longHeading) {
+			whole = true
+		}
+	}
+	if !whole {
+		t.Error("Điều 3 heading line was cut across child chunks")
 	}
 }

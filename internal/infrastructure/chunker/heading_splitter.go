@@ -97,23 +97,46 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 			continue
 		}
 
-		// Section too large: defer to the legacy splitter for inner
-		// segmentation. We do NOT shrink the inner ChunkSize budget here
-		// because the breadcrumb no longer counts against Content size.
-		// Each sub-chunk gets a breadcrumb reflecting the deepest heading
-		// active at its start, so deep `###`/`####` sub-headings inside a
-		// long section aren't collapsed to the section-level header.
+		// Section too large: split it at its deeper sub-headings first so no
+		// chunk starts mid-way through a sub-section (e.g. an Điều inside a
+		// long Chương); coalesceTinyChunks re-packs the small ones below.
+		// Only a sub-section still too large goes to the legacy splitter. We
+		// do NOT shrink the inner ChunkSize budget here because the
+		// breadcrumb no longer counts against Content size. Each piece gets
+		// the breadcrumb of the deepest heading active at its start, so deep
+		// `###`/`####` sub-headings aren't collapsed to the section header.
 		subBreadcrumbs := sectionBreadcrumbs(sectionRunes, primaryLevel, sectionStart)
-		subChunks := SplitText(sectionContent, cfg)
-		for _, sub := range subChunks {
-			out = append(out, Chunk{
-				Content:       sub.Content,
-				ContextHeader: breadcrumbAtOffset(subBreadcrumbs, sub.Start, breadcrumb),
-				Seq:           seq,
-				Start:         b.runeStart + sub.Start,
-				End:           b.runeStart + sub.End,
-			})
-			seq++
+		for j, sb := range subBreadcrumbs {
+			blockEnd := secLen
+			if j+1 < len(subBreadcrumbs) {
+				blockEnd = subBreadcrumbs[j+1].runeStart
+			}
+			if blockEnd <= sb.runeStart {
+				continue
+			}
+			blockStart := b.runeStart + sb.runeStart
+			block := string(sectionRunes[sb.runeStart:blockEnd])
+			if blockEnd-sb.runeStart <= cfg.ChunkSize {
+				out = append(out, Chunk{
+					Content:       block,
+					ContextHeader: sb.breadcrumb,
+					Seq:           seq,
+					Start:         blockStart,
+					End:           b.runeStart + blockEnd,
+				})
+				seq++
+				continue
+			}
+			for _, sub := range SplitText(block, cfg) {
+				out = append(out, Chunk{
+					Content:       sub.Content,
+					ContextHeader: sb.breadcrumb,
+					Seq:           seq,
+					Start:         blockStart + sub.Start,
+					End:           blockStart + sub.End,
+				})
+				seq++
+			}
 		}
 	}
 
@@ -218,9 +241,7 @@ func findHeadingBoundaries(text string, primaryLevel int) []headingBoundary {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if code, _ := fence.consume(line); !code {
-			m := MarkdownHeadingPattern.FindStringSubmatch(line)
-			if m != nil {
-				level := len(m[1])
+			if level, _ := parseHeading(line); level > 0 {
 				if level >= 1 && level <= primaryLevel && pos > 0 {
 					bounds = append(bounds, headingBoundary{
 						runeStart: pos,
@@ -255,12 +276,7 @@ func observeSubHeadings(runes []rune, primaryLevel int, h *HeadingHierarchy) {
 		if code, _ := fence.consume(line); code {
 			continue
 		}
-		m := MarkdownHeadingPattern.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		level := len(m[1])
-		if level > primaryLevel {
+		if level, _ := parseHeading(line); level > primaryLevel {
 			h.Observe(line)
 		}
 	}
@@ -288,7 +304,7 @@ func sectionBreadcrumbs(sectionRunes []rune, primaryLevel int, seed HeadingHiera
 	lines := strings.Split(string(sectionRunes), "\n")
 	for i, line := range lines {
 		if code, _ := fence.consume(line); !code {
-			if m := MarkdownHeadingPattern.FindStringSubmatch(line); m != nil && len(m[1]) > primaryLevel {
+			if level, _ := parseHeading(line); level > primaryLevel {
 				h.Observe(line)
 				result = append(result, sectionBreadcrumb{
 					runeStart:  pos,

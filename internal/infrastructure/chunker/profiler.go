@@ -184,14 +184,10 @@ func ProfileDocument(text string) *DocProfile {
 	return p
 }
 
-// matchHeading checks whether line is an ATX heading and increments the
-// appropriate level counter when so. Returns true on match.
+// matchHeading checks whether line is a heading (see parseHeading) and
+// increments the appropriate level counter when so. Returns true on match.
 func matchHeading(line string, counts *map[int]int) bool {
-	m := MarkdownHeadingPattern.FindStringSubmatch(line)
-	if m == nil {
-		return false
-	}
-	level := len(m[1])
+	level, _ := parseHeading(line)
 	if level < 1 || level > 6 {
 		return false
 	}

@@ -26,21 +26,16 @@ func NewHeadingHierarchy() *HeadingHierarchy {
 	return &HeadingHierarchy{}
 }
 
-// Observe parses line and updates the hierarchy if line is a Markdown
-// heading. Returns the (level, headingText) when a heading was recognized,
+// Observe parses line and updates the hierarchy if line is a heading (see
+// parseHeading). Returns the (level, headingText) when a heading was recognized,
 // or (0, "") otherwise. Lines that look like headings inside fenced code
 // blocks are NOT detected here — callers must avoid feeding code-block
 // content to Observe (the heading splitter does so).
 func (h *HeadingHierarchy) Observe(line string) (int, string) {
-	m := MarkdownHeadingPattern.FindStringSubmatch(line)
-	if m == nil {
-		return 0, ""
-	}
-	level := len(m[1])
+	level, heading := parseHeading(line)
 	if level < 1 || level > 6 {
 		return 0, ""
 	}
-	heading := strings.TrimSpace(m[2])
 	// Replace this level and clear deeper ones — siblings/descendants of
 	// the previous heading at this level are no longer in scope.
 	h.stack[level-1] = heading

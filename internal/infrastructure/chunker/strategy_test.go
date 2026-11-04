@@ -146,7 +146,7 @@ func TestSplitParentChild_AutoStrategyEnrichesChildBreadcrumbs(t *testing.T) {
 	}
 
 	// And no breadcrumb should contain the same line twice in a row
-	// (mergeBreadcrumbs deduplicates the parent/child seam).
+	// (the parent breadcrumb seeds the child's, so the seam is not repeated).
 	for i, c := range res.Children {
 		lines := strings.Split(c.ContextHeader, "\n")
 		for j := 1; j < len(lines); j++ {
@@ -170,30 +170,6 @@ func lastHeader(cs []ChildChunk) string {
 		return ""
 	}
 	return cs[len(cs)-1].ContextHeader
-}
-
-func TestMergeBreadcrumbs(t *testing.T) {
-	cases := []struct {
-		name          string
-		parent, child string
-		want          string
-	}{
-		{"empty parent", "", "## Sub", "## Sub"},
-		{"empty child", "# Top", "", "# Top"},
-		{"both empty", "", "", ""},
-		{"disjoint", "# Top", "## Other", "# Top\n## Other"},
-		{"duplicate seam", "# Top\n## A", "## A\n### A1", "# Top\n## A\n### A1"},
-		{"deep duplicate", "# Top", "# Top", "# Top"},
-		{"only whitespace differs", "# Top\n## A", "  ## A  \n### A1", "# Top\n## A\n### A1"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := mergeBreadcrumbs(tc.parent, tc.child)
-			if got != tc.want {
-				t.Errorf("mergeBreadcrumbs(%q, %q) = %q, want %q", tc.parent, tc.child, got, tc.want)
-			}
-		})
-	}
 }
 
 func TestSplitParentChild_LegacyStrategy(t *testing.T) {

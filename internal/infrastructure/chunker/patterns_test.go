@@ -142,6 +142,10 @@ func TestPageFooterPattern(t *testing.T) {
 		{"Seite 9", true},
 		{"页 3", true},
 		{"页码 3 / 12", true},
+		{"Trang 3", true},
+		{"Trang 3/10", true},
+		{"trang 3 / 10", true},
+		{"Trang chủ", false},
 		{"Some text", false},
 	}
 	for _, c := range cases {
@@ -159,13 +163,51 @@ func TestAllCapsHeadingPattern(t *testing.T) {
 	}{
 		{"INTRODUCTION", true},
 		{"METHODS AND MATERIALS", true},
+		{"NHỮNG QUY ĐỊNH CHUNG", true},
+		{"ĐIỀU KHOẢN THI HÀNH", true},
+		{"HOẠT ĐỘNG SẢN XUẤT, MUA, BÁN VÀNG MIẾNG", true},
 		{"Mixed Case Heading", false},
+		{"Những quy định chung", false},
 		{"ABC", false}, // <4 chars
 	}
 	for _, c := range cases {
 		got := AllCapsHeadingPattern.MatchString(c.in)
 		if got != c.match {
 			t.Errorf("AllCapsHeadingPattern(%q): got %v want %v", c.in, got, c.match)
+		}
+	}
+}
+
+func TestVietnameseChapterPattern(t *testing.T) {
+	cases := []struct {
+		in    string
+		match bool
+	}{
+		{"Phần I. QUY ĐỊNH CHUNG", true},
+		{"PHẦN 2", true},
+		{"Chương I", true},
+		{"Chương II HOẠT ĐỘNG SẢN XUẤT, GIA CÔNG", true},
+		{"CHƯƠNG 3: ĐIỀU KHOẢN THI HÀNH", true},
+		{"Mục 1. MUA, BÁN VÀNG MIẾNG", true},
+		{"Mục 2 XUẤT KHẨU, NHẬP KHẨU VÀNG", true},
+		{"Điều 1. Phạm vi điều chỉnh", true},
+		{"Điều 11a. Điều kiện cấp Giấy phép sản xuất vàng miếng", true},
+		{"Điều 5.¹⁰ (được bãi bỏ)", true},
+		{"ĐIỀU 4. HIỆU LỰC THI HÀNH", true},
+		{"## Điều 4. Xuất khẩu, nhập khẩu vàng", true},
+		{"“Điều 4. Hồ sơ quản lý, theo dõi hoạt động phòng cháy và chữa cháy", true}, // quoted amendment
+		{"1. Tổ chức tín dụng được phép kinh doanh vàng", false},                     // Khoản
+		{"a) Doanh nghiệp kinh doanh vàng", false},                                   // Điểm
+		{"Khoản 1 Điều 2 được sửa đổi", false},
+		{"Điều 37 của Thông tư số 42/2019/TT-BCT, có hiệu lực", false}, // body text citing an Điều
+		{"Điều 2, Điều 3, Điều 4 của Thông tư số 62/2026/TT-BCT", false},
+		{"Chương II của Luật này quy định", false},
+		{"Chapter 1: Intro", false},
+	}
+	for _, c := range cases {
+		got := VietnameseChapterPattern.MatchString(c.in)
+		if got != c.match {
+			t.Errorf("VietnameseChapterPattern(%q): got %v want %v", c.in, got, c.match)
 		}
 	}
 }
@@ -186,8 +228,11 @@ func TestSentenceSeparators(t *testing.T) {
 }
 
 func TestChapterPatternsForLangs(t *testing.T) {
-	if got := ChapterPatternsForLangs(nil); len(got) != 3 {
-		t.Errorf("nil langs should return all 3, got %d", len(got))
+	if got := ChapterPatternsForLangs(nil); len(got) != 4 {
+		t.Errorf("nil langs should return all 4, got %d", len(got))
+	}
+	if got := ChapterPatternsForLangs([]string{LangVietnamese}); len(got) != 1 || got[0] != VietnameseChapterPattern {
+		t.Errorf("only VI requested should return the Vietnamese pattern, got %v", got)
 	}
 	if got := ChapterPatternsForLangs([]string{LangGerman}); len(got) != 1 {
 		t.Errorf("only DE requested should return 1, got %d", len(got))
@@ -195,7 +240,7 @@ func TestChapterPatternsForLangs(t *testing.T) {
 	if got := ChapterPatternsForLangs([]string{LangGerman, LangChinese}); len(got) != 2 {
 		t.Errorf("DE+ZH requested should return 2, got %d", len(got))
 	}
-	if got := ChapterPatternsForLangs([]string{"xx"}); len(got) != 3 {
-		t.Errorf("unknown lang should fall back to all 3, got %d", len(got))
+	if got := ChapterPatternsForLangs([]string{"xx"}); len(got) != 4 {
+		t.Errorf("unknown lang should fall back to all 4, got %d", len(got))
 	}
 }

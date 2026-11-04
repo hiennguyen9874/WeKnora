@@ -132,6 +132,9 @@ var protectedPatterns = []*regexp.Regexp{
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
 	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
 	regexp.MustCompile("`[^`\\r\\n]+`"),                                                                 // Markdown inline code
+	// Vietnamese legal headings ("Điều 1. <title>") stay whole: the ". "
+	// separator would otherwise split "Điều 1." from its title.
+	VietnameseChapterPattern,
 }
 
 type span struct {

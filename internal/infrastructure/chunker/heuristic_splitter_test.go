@@ -3,6 +3,7 @@ package chunker
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSplitByHeuristics_FormFeedBoundary(t *testing.T) {
@@ -175,4 +176,38 @@ func chunkLengths(chunks []Chunk) []int {
 		out[i] = len([]rune(c.Content))
 	}
 	return out
+}
+
+// TestFindHeuristicBoundaries_VietnameseLegal: Chương/Mục/Điều lines, the
+// all-caps Chương title with Vietnamese diacritics and the "Trang 3/10"
+// footer are boundaries; numbered Khoản lines ("1.", "2.") are not.
+func TestFindHeuristicBoundaries_VietnameseLegal(t *testing.T) {
+	lineAt := map[int]string{}
+	pos := 0
+	for _, line := range strings.Split(vietnameseLawDoc, "\n") {
+		lineAt[pos] = line
+		pos += utf8.RuneCountInString(line) + 1
+	}
+	got := map[string]bool{}
+	for _, b := range findHeuristicBoundaries(vietnameseLawDoc, []string{LangVietnamese}) {
+		if line, ok := lineAt[b.runeStart]; ok {
+			got[line] = true
+		}
+	}
+	for _, want := range []string{
+		"Điều 1. Phạm vi điều chỉnh",
+		"Chương II",
+		"HOẠT ĐỘNG SẢN XUẤT, MUA, BÁN VÀNG MIẾNG",
+		"Mục 1. MUA, BÁN VÀNG MIẾNG",
+		"Trang 3/10",
+	} {
+		if !got[want] {
+			t.Errorf("missing boundary at %q", want)
+		}
+	}
+	for line := range got {
+		if strings.HasPrefix(line, "1. ") || strings.HasPrefix(line, "2. ") || strings.HasPrefix(line, "3. ") {
+			t.Errorf("Khoản line used as a boundary: %q", line)
+		}
+	}
 }
