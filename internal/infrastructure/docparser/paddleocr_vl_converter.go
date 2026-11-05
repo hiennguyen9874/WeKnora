@@ -93,7 +93,7 @@ func paddleOCRVLRecognitionParams(useSeal, useChart bool) map[string]interface{}
 	return map[string]interface{}{
 		"markdownIgnoreLabels": []string{
 			"header", "header_image", "footer", "footer_image",
-			"number", "footnote", "aside_text",
+			"number", "aside_text",
 		},
 		"useDocOrientationClassify": false,
 		"useDocUnwarping":           false,

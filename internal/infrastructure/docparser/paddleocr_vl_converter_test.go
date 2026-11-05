@@ -2,11 +2,13 @@ package docparser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -43,6 +45,47 @@ func TestPaddleOCRVLTimeoutConfig(t *testing.T) {
 				t.Fatalf("timeout = %s, want %s", reader.timeout, tt.want)
 			}
 		})
+	}
+}
+
+func TestPaddleOCRVLReadPreservesFootnotes(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1,localhost")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	const markdown = "Điều 1. Phạm vi điều chỉnh\n\n1 Điều này được bổ sung theo quy định tại khoản 7 Điều 1."
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/layout-parsing" {
+			t.Errorf("request = %s %s, want POST /layout-parsing", r.Method, r.URL.Path)
+		}
+		var body struct {
+			MarkdownIgnoreLabels []string `json:"markdownIgnoreLabels"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if slices.Contains(body.MarkdownIgnoreLabels, "footnote") {
+			t.Error("markdownIgnoreLabels must not discard footnote")
+		}
+		for _, label := range []string{"header", "header_image", "footer", "footer_image", "number", "aside_text"} {
+			if !slices.Contains(body.MarkdownIgnoreLabels, label) {
+				t.Errorf("markdownIgnoreLabels must still discard %s", label)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"errorCode":0,"result":{"layoutParsingResults":[
+ {"markdown":{"text":"Điều 1. Phạm vi điều chỉnh\n\n1 Điều này được bổ sung theo quy định tại khoản 7 Điều 1.","images":{}}}]}}`)
+	}))
+	defer server.Close()
+	reader := NewPaddleOCRVLReader(map[string]string{"paddleocr_vl_endpoint": server.URL})
+	result, err := reader.Read(context.Background(), &types.ReadRequest{
+		FileName: "law.pdf", FileType: "pdf", FileContent: []byte("test"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MarkdownContent != markdown {
+		t.Fatalf("markdown = %q, want %q", result.MarkdownContent, markdown)
 	}
 }
 
