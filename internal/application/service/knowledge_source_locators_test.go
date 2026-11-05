@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,16 +65,22 @@ func TestTranscriptWithSegments(t *testing.T) {
 
 func TestBuildSourceIndexPreservesOriginalLocationsAfterNFC(t *testing.T) {
 	final := "Điều 8.\n\n1. Nhà nước được tổ chức và hoạt động theo Hiến pháp và pháp luật."
-	parsed := norm.NFD.String(final)
-	blocks := passThroughTextBlocks(parsed)
-	require.Len(t, blocks, 2)
-	idx := buildSourceIndex(parsed, blocks, final, nil)
-	require.NotNil(t, idx)
-	locs := idx.Locators(9, len([]rune(final)))
-	require.Len(t, locs, 1)
-	assert.Equal(t, "1. Nhà nước được tổ chức và hoạt động theo Hiến pháp và pháp luật.", locs[0].Quote)
-	assert.Equal(t, blocks[1].Locator.Start, locs[0].Start)
-	assert.Equal(t, blocks[1].Locator.End, locs[0].End)
+	for _, ending := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("ending=%q", ending), func(t *testing.T) {
+			parsed := strings.ReplaceAll(norm.NFD.String(final), "\n", ending)
+			blocks := passThroughTextBlocks(parsed)
+			require.Len(t, blocks, 2)
+			idx := buildSourceIndex(parsed, blocks, final, nil)
+			require.NotNil(t, idx)
+			for i, span := range [][2]int{{0, 7}, {9, len([]rune(final))}} {
+				locs := idx.Locators(span[0], span[1])
+				require.Len(t, locs, 1)
+				assert.Equal(t, string([]rune(final)[span[0]:span[1]]), locs[0].Quote)
+				assert.Equal(t, blocks[i].Locator.Start, locs[0].Start)
+				assert.Equal(t, blocks[i].Locator.End, locs[0].End)
+			}
+		})
+	}
 }
 
 func TestBuildSourceIndexFollowsRewritesAndPlacesImages(t *testing.T) {

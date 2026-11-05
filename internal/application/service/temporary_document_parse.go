@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -123,7 +124,7 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	}
 	content = common.CleanInvalidUTF8(content)
 	content = chunker.NormalizeLineEndings(content)
-	content = docparser.NormalizeHTMLTables(content)
+	content = norm.NFC.String(docparser.NormalizeHTMLTables(content))
 	lang := chunker.DetectLanguage(content)
 	cfg := chunker.DefaultConfig()
 	cfg.Strategy = chunker.StrategyAuto

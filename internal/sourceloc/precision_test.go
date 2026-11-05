@@ -163,6 +163,28 @@ func TestAlignmentDecodesTableEntitiesWithoutLosingOffsets(t *testing.T) {
 	require.Equal(t, 2, remapped[0].Locator.Page)
 }
 
+func TestRemapBlocksPreservesEntityEncodedAccents(t *testing.T) {
+	old := "<table><tr><td>Nha&#x300; nước</td></tr></table>"
+	final := "| Nhà nước |\n| --- |"
+	blocks := []types.SourceBlock{{
+		Start: 0, End: len([]rune(old)),
+		Locator: types.SourceLocator{Type: "pdf", Page: 2},
+	}}
+	remapped := RemapBlocks(blocks, old, final)
+	require.Len(t, remapped, 1)
+	locs := NewIndex(final, remapped).Locators(0, len([]rune(final)))
+	require.Len(t, locs, 1)
+	require.Equal(t, 2, locs[0].Page)
+	require.Contains(t, locs[0].Quote, "Nhà nước")
+	require.False(t, locs[0].Partial)
+	require.Empty(t, RemapBlocks(blocks, old, "| Nha nước |"))
+
+	// A detached accent must not compose across discarded whitespace.
+	separated := "<table><tr><td>Nha &#x300; nước</td></tr></table>"
+	blocks[0].End = len([]rune(separated))
+	require.Empty(t, RemapBlocks(blocks, separated, final))
+}
+
 func TestImagePlaceholderDoesNotInvalidateVerifiedTextLocators(t *testing.T) {
 	md := "第一段完整的原文。\n\n![descript](resource://image)\n\n第二段完整的原文。"
 	blocks := Align(md, []Unit{

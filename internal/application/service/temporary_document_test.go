@@ -6,9 +6,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
 )
 
 // fakeVLM is a minimal VLM stub that records calls and returns a fixed response.
@@ -83,6 +88,64 @@ type fakeVLMModelService struct {
 
 func (s *fakeVLMModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
 	return s.model, nil
+}
+
+type nfcTemporaryDocumentRepo struct {
+	interfaces.TemporaryDocumentRepository
+	doc   *types.TemporaryDocument
+	ready bool
+}
+
+func (r *nfcTemporaryDocumentRepo) GetByID(context.Context, uint64, string) (*types.TemporaryDocument, error) {
+	return r.doc, nil
+}
+
+func (r *nfcTemporaryDocumentRepo) MarkProcessing(context.Context, uint64, string, time.Time) error {
+	return nil
+}
+
+func (r *nfcTemporaryDocumentRepo) MarkReady(_ context.Context, _ uint64, _, content string,
+	chunks, _, _ types.JSON, _, _ int, _ time.Time,
+) error {
+	r.ready = true
+	r.doc.Content, r.doc.Chunks = content, chunks
+	return nil
+}
+
+func TestTemporaryDocumentProcessNormalizesBeforeChunking(t *testing.T) {
+	plain := strings.Repeat("Nhà nước được tổ chức và hoạt động theo Hiến pháp và pháp luật.\r\n\r\n", 80)
+	for name, content := range map[string]string{
+		"NFC":    plain,
+		"NFD":    norm.NFD.String(plain),
+		"entity": "<table><tr><td>Nha&#x300; nước</td></tr></table>",
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := &types.TemporaryDocument{ID: "nfc-doc", TenantID: 7, FileType: ".md", ResourceRef: "local://nfc.md"}
+			repo := &nfcTemporaryDocumentRepo{doc: doc}
+			svc := &temporaryDocumentService{
+				repo:          repo,
+				fileService:   &stagingFileService{files: map[string][]byte{doc.ResourceRef: []byte(content)}},
+				tenantService: &stubTenantServiceForModelDelete{tenant: &types.Tenant{ID: 7}},
+			}
+			payload, err := json.Marshal(types.TemporaryDocumentTaskPayload{TenantID: 7, DocumentID: doc.ID})
+			require.NoError(t, err)
+			require.NoError(t, svc.Process(context.Background(), asynq.NewTask("test", payload)))
+			require.True(t, repo.ready)
+			require.True(t, norm.NFC.IsNormalString(doc.Content))
+			require.Contains(t, doc.Content, "Nhà nước")
+			require.NotContains(t, doc.Content, "\r")
+			var chunks []types.TemporaryDocumentChunk
+			require.NoError(t, json.Unmarshal(doc.Chunks, &chunks))
+			require.NotEmpty(t, chunks)
+			for _, chunk := range chunks {
+				require.True(t, norm.NFC.IsNormalString(chunk.Content))
+				require.True(t, norm.NFC.IsNormalString(chunk.ContextHeader))
+				require.GreaterOrEqual(t, chunk.Start, 0)
+				require.Greater(t, chunk.End, chunk.Start)
+				require.LessOrEqual(t, chunk.End, len([]rune(doc.Content)))
+			}
+		})
+	}
 }
 
 func TestApproxTextContentRunes(t *testing.T) {

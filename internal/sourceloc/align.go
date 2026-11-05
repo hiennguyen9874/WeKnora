@@ -2,12 +2,14 @@ package sourceloc
 
 import (
 	"html"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Unit is one structural piece of an original file (a paragraph, a slide
@@ -32,7 +34,7 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 	for _, u := range units {
 		counts[normalizeKey(u.Text)]++
 	}
-	matches := indexNormalizedMatches(norm.text, counts)
+	matches := indexNormalizedMatches(norm, runes, counts)
 	for _, u := range units {
 		key := normalizeKey(u.Text)
 		if utf8.RuneCountInString(key) < alignMinRunes {
@@ -87,7 +89,8 @@ const alignIndexPrefixBytes = 32
 // unit, so a table with one unit per row scanned the whole document once per
 // row. Long keys are bucketed by a fixed byte prefix; short keys are grouped
 // by their first rune and checked directly.
-func indexNormalizedMatches(text string, counts map[string]int) map[string][]int {
+func indexNormalizedMatches(projected normalized, runes []rune, counts map[string]int) map[string][]int {
+	text := projected.text
 	long := make(map[string][]string)
 	short := make(map[rune][]string)
 	for key := range counts {
@@ -106,13 +109,13 @@ func indexNormalizedMatches(text string, counts map[string]int) map[string][]int
 	for at := 0; at < len(text); {
 		first, size := utf8.DecodeRuneInString(text[at:])
 		for _, key := range short[first] {
-			if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(text, at, key) {
+			if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(projected, runes, at, key) {
 				matches[key] = append(matches[key], at)
 			}
 		}
 		if end := at + alignIndexPrefixBytes; end <= len(text) {
 			for _, key := range long[text[at:end]] {
-				if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(text, at, key) {
+				if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(projected, runes, at, key) {
 					matches[key] = append(matches[key], at)
 				}
 			}
@@ -123,14 +126,30 @@ func indexNormalizedMatches(text string, counts map[string]int) map[string][]int
 }
 
 // normalizedBoundaryOK rejects a key embedded in a different numeric value.
-func normalizedBoundaryOK(text string, at int, key string) bool {
+func normalizedBoundaryOK(projected normalized, runes []rune, at int, key string) bool {
+	text := projected.text
 	first, _ := utf8.DecodeRuneInString(key)
 	last, _ := utf8.DecodeLastRuneInString(key)
 	before, _ := utf8.DecodeLastRuneInString(text[:at])
-	after, _ := utf8.DecodeRuneInString(text[at+len(key):])
+	end := at + len(key)
+	after, _ := utf8.DecodeRuneInString(text[end:])
+	// Projection removes line breaks, but numbers on separate lines are not
+	// one numeric value (for example an article number followed by "1.").
+	if unicode.IsDigit(first) && at > 0 && projected.end[at-1] < projected.pos[at] &&
+		hasLineBreak(runes[projected.end[at-1]:projected.pos[at]]) {
+		before = 0
+	}
+	if unicode.IsDigit(last) && end < len(text) && projected.end[end-1] < projected.pos[end] &&
+		hasLineBreak(runes[projected.end[end-1]:projected.pos[end]]) {
+		after = 0
+	}
 	left := unicode.IsDigit(first) && (unicode.IsDigit(before) || strings.ContainsRune(".,:/+−-", before))
 	right := unicode.IsDigit(last) && (unicode.IsDigit(after) || strings.ContainsRune(".,:/%‰", after))
 	return !left && !right
+}
+
+func hasLineBreak(runes []rune) bool {
+	return slices.Contains(runes, '\n') || slices.Contains(runes, '\r')
 }
 
 // lineLeadStart moves pos back to the start of its line when everything
@@ -167,6 +186,10 @@ func normalizeMarkdown(markdown string) normalized {
 	pos := make([]int, 0, len(markdown))
 	ends := make([]int, 0, len(markdown))
 	emit := func(r rune, start, end int) {
+		// Do not attach a detached accent across discarded whitespace/markup.
+		if unicode.IsMark(r) && (len(ends) == 0 || ends[len(ends)-1] < start) {
+			return
+		}
 		before := b.Len()
 		b.WriteRune(r)
 		for k := before; k < b.Len(); k++ {
@@ -216,13 +239,35 @@ func normalizeMarkdown(markdown string) normalized {
 			emit(nr, i, i+1)
 		}
 	}
+	return composeProjection(normalized{text: b.String(), pos: pos, end: ends})
+}
+
+// composeProjection also composes accents decoded from HTML entities, keeping
+// offsets in the original Markdown rather than in the shorter NFC text.
+func composeProjection(projected normalized) normalized {
+	if norm.NFC.IsNormalString(projected.text) {
+		return projected
+	}
+	var b strings.Builder
+	pos, ends := make([]int, 0, len(projected.pos)), make([]int, 0, len(projected.end))
+	var iter norm.Iter
+	iter.InitString(norm.NFC, projected.text)
+	for !iter.Done() {
+		start := iter.Pos()
+		segment := iter.Next()
+		b.Write(segment)
+		for range segment {
+			pos = append(pos, projected.pos[start])
+			ends = append(ends, projected.end[iter.Pos()-1])
+		}
+	}
 	return normalized{text: b.String(), pos: pos, end: ends}
 }
 
 // normalizeKey projects plain text onto its letters and digits.
 func normalizeKey(text string) string {
 	var b strings.Builder
-	runes := []rune(text)
+	runes := []rune(norm.NFC.String(text))
 	for i := range runes {
 		if r, ok := matchRune(runes, i); ok {
 			b.WriteRune(r)
@@ -260,13 +305,13 @@ func matchRune(rs []rune, i int) (rune, bool) {
 	return foldRune(r)
 }
 
-// foldRune keeps letters and digits, lower-cased and with full-width ASCII
-// folded to its half-width form.
+// foldRune keeps letters, digits and combining marks, lower-cased and with
+// full-width ASCII folded to its half-width form.
 func foldRune(r rune) (rune, bool) {
 	if r >= 0xFF01 && r <= 0xFF5E {
 		r -= 0xFEE0
 	}
-	if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+	if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) {
 		return 0, false
 	}
 	return unicode.ToLower(r), true
