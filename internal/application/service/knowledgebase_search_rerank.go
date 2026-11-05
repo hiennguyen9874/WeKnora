@@ -49,10 +49,8 @@ func resolveRerankModelID(
 		logger.Warnf(ctx, "Rerank model auto-detection failed: %v", err)
 		return "", "", nil
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeRerank {
-			return model.ID, types.RerankModelSourceAuto, nil
-		}
+	if model := types.PickDefaultModel(models, types.ModelTypeRerank); model != nil {
+		return model.ID, types.RerankModelSourceAuto, nil
 	}
 	return "", "", nil
 }
@@ -183,6 +181,7 @@ func (s *knowledgeBaseService) rerankCandidates(
 		diag.Error = err.Error()
 		return retrievalOrder
 	}
+	s.markSkipGeneratedQuestions(ctx, candidates)
 
 	res := reranking.Rerank(ctx, model, query, candidates, reranking.Options{
 		Threshold:        threshold,

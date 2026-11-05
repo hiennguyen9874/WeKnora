@@ -1,6 +1,8 @@
 package docparser
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -17,13 +19,14 @@ import (
 //
 // Embedded images are rendered in place from the document model. PDFs with no
 // text layer or a structure anydoc rejects are handed to the configured
-// fallback reader (typically the builtin docreader).
+// fallback reader (typically the builtin docreader). PPTX files with EMF/WMF
+// media use the docreader's MarkItDown path to rasterize those embedded images.
 type AnydocReader struct {
 	// extractImages controls whether embedded images are parsed and placed
 	// in the markdown. Off halves parse time for text-only indexing.
 	extractImages bool
-	// fallback is used when a PDF needs OCR or has an invalid structure. Nil means the
-	// conversion error is returned to the caller.
+	// fallback handles PDFs requiring OCR/structure recovery and PPTX vector
+	// media. Nil means the required conversion is reported as an error.
 	fallback interfaces.DocReader
 }
 
@@ -45,6 +48,13 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	format, ok := anydoc.FormatForFile(req.FileType, req.FileName)
 	if !ok {
 		return nil, fmt.Errorf("anydoc engine does not support file type %q", fileTypeOf(req))
+	}
+	// Anydoc preserves vector bytes, but cannot rasterize EMF/WMF for the
+	// browser or VLM. MarkItDown's PPTX path already provides that conversion.
+	// Check the actual extension: anydoc also maps PPTM to its PPTX parser,
+	// but docreader does not support PPTM.
+	if r.extractImages && fileTypeOf(req) == "pptx" && pptxHasVectorMedia(req.FileContent) {
+		return r.readVectorPPTX(ctx, req)
 	}
 
 	converted, err := anydoc.Convert(req.FileContent, anydoc.Options{
@@ -74,6 +84,52 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 			"source_format":  format,
 		},
 	}, nil
+}
+
+// Inspect only the ZIP directory: no media decompression or filesystem writes
+// are needed to decide which reader can preserve the presentation's images.
+func pptxHasVectorMedia(data []byte) bool {
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false // Let the converter report malformed input normally.
+	}
+	for _, file := range archive.File {
+		if file.FileInfo().IsDir() || !strings.HasPrefix(file.Name, "ppt/media/") {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(file.Name)) {
+		case ".emf", ".wmf":
+			return true
+		}
+	}
+	return false
+}
+
+func (r *AnydocReader) readVectorPPTX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if !r.canFallback() {
+		return nil, fmt.Errorf(
+			"anydoc conversion of %q with EMF/WMF images requires a connected docreader "+
+				"with MarkItDown and ImageMagick",
+			req.FileName)
+	}
+	logger.Infof(ctx, "[anydoc] %q contains EMF/WMF images, falling back to markitdown for rasterization", req.FileName)
+	fallbackReq := *req
+	fallbackReq.ParserEngine = "markitdown"
+	result, err := r.fallback.Read(ctx, &fallbackReq)
+	if err != nil {
+		return nil, fmt.Errorf("anydoc PPTX vector-media fallback failed for %q: %w", req.FileName, err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("anydoc PPTX vector-media fallback returned no result for %q", req.FileName)
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]string{}
+	}
+	if result.Metadata["parser"] == "" {
+		result.Metadata["parser"] = "markitdown"
+	}
+	result.Metadata["anydoc_fallback"] = "pptx_vector_media"
+	return result, nil
 }
 
 func pdfMarkdownIsEmpty(converted *anydoc.Result, err error) bool {
