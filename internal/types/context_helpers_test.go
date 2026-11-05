@@ -83,6 +83,10 @@ func TestLanguageLocaleName(t *testing.T) {
 		{"Portuguese pt-BR", "pt-BR", "Portuguese"},
 		{"Portuguese pt", "pt", "Portuguese"},
 
+		// Vietnamese processing language (not a supported UI locale)
+		{"Vietnamese vi", "vi", "Vietnamese"},
+		{"Vietnamese vi-VN", "vi-VN", "Vietnamese"},
+
 		// Unknown/fallback
 		{"Unknown locale", "unknown", "unknown"},
 		{"Empty locale", "", ""},
@@ -94,6 +98,28 @@ func TestLanguageLocaleName(t *testing.T) {
 			result := LanguageLocaleName(tt.locale)
 			if result != tt.expected {
 				t.Errorf("LanguageLocaleName(%q) = %q, want %q", tt.locale, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestVietnamesePromptLanguage(t *testing.T) {
+	for _, locale := range []string{"vi", "vi-VN"} {
+		t.Run(locale, func(t *testing.T) {
+			t.Setenv("WEKNORA_LANGUAGE", locale)
+			for _, ctx := range []context.Context{
+				context.Background(),
+				context.WithValue(context.Background(), LanguageContextKey, locale),
+			} {
+				if got := LanguageNameFromContext(ctx); got != "Vietnamese" {
+					t.Errorf("LanguageNameFromContext = %q, want Vietnamese", got)
+				}
+			}
+			if got := ResolveLanguageName(context.Background(), locale); got != "Vietnamese" {
+				t.Errorf("ResolveLanguageName = %q, want Vietnamese", got)
+			}
+			if got := NormalizeSupportedLocale(locale); got != "" {
+				t.Errorf("processing language must not become a supported UI locale: %q", got)
 			}
 		})
 	}
