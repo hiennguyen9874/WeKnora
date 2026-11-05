@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"golang.org/x/text/unicode/norm"
 )
 
 // maxRetrievalPoolSize bounds every retrieval depth derived from MatchCount:
@@ -133,6 +134,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 ) ([]*types.SearchResult, error) {
 	// Normalize once, before anything reads MatchCount. params is a value
 	// copy, so this stays local to the call.
+	params.QueryText = norm.NFC.String(params.QueryText)
 	params.MatchCount = normalizedMatchCount(params.MatchCount)
 
 	chunks, err := s.hybridSearchCandidates(ctx, id, params)

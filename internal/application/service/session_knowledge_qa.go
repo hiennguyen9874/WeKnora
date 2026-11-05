@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/unicode/norm"
 )
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
@@ -674,6 +675,9 @@ func intersectStrings(left []string, right []string) []string {
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
+	// Normalize at pipeline entry, before history, rewriting, expansion or retrieval.
+	chatManage.Query = norm.NFC.String(chatManage.Query)
+	chatManage.RewriteQuery = norm.NFC.String(chatManage.RewriteQuery)
 	ctx = types.WithSessionID(ctx, chatManage.SessionID)
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",

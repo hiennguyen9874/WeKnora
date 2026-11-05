@@ -21,6 +21,7 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"golang.org/x/text/unicode/norm"
 )
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
@@ -1403,7 +1404,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	// Normalize inline HTML tables before chunking, for the same reason as the
 	// file-processing path: parser/OCR output may embed raw <table> blocks that
 	// the chunker cannot split. Fenced code examples are left untouched.
-	clean = docparser.NormalizeHTMLTables(clean)
+	clean = norm.NFC.String(docparser.NormalizeHTMLTables(clean))
 
 	// Manual content is markdown - chunk directly with Go chunker
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)

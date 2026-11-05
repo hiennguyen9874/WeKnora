@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"golang.org/x/text/unicode/norm"
 )
 
 // resolveRerankModelID picks the rerank model for a retrieval API request:
@@ -67,6 +68,7 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 	id string,
 	params types.SearchParams,
 ) (*types.RetrievalResult, error) {
+	params.QueryText = norm.NFC.String(params.QueryText)
 	if !params.Rerank.IsEnabled() {
 		results, err := s.HybridSearch(ctx, id, params)
 		if err != nil {

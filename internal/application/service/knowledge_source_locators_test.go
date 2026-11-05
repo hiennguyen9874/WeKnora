@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/unicode/norm"
 )
 
 func TestAttachStructureBlocksForPassThroughText(t *testing.T) {
@@ -58,6 +59,20 @@ func TestTranscriptWithSegments(t *testing.T) {
 	text, blocks = transcriptWithSegments(&asr.TranscriptionResult{Text: "plain"})
 	assert.Equal(t, "plain", text)
 	assert.Nil(t, blocks)
+}
+
+func TestBuildSourceIndexPreservesOriginalLocationsAfterNFC(t *testing.T) {
+	final := "Điều 8.\n\n1. Nhà nước được tổ chức và hoạt động theo Hiến pháp và pháp luật."
+	parsed := norm.NFD.String(final)
+	blocks := passThroughTextBlocks(parsed)
+	require.Len(t, blocks, 2)
+	idx := buildSourceIndex(parsed, blocks, final, nil)
+	require.NotNil(t, idx)
+	locs := idx.Locators(9, len([]rune(final)))
+	require.Len(t, locs, 1)
+	assert.Equal(t, "1. Nhà nước được tổ chức và hoạt động theo Hiến pháp và pháp luật.", locs[0].Quote)
+	assert.Equal(t, blocks[1].Locator.Start, locs[0].Start)
+	assert.Equal(t, blocks[1].Locator.End, locs[0].End)
 }
 
 func TestBuildSourceIndexFollowsRewritesAndPlacesImages(t *testing.T) {

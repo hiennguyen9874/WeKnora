@@ -33,6 +33,7 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"golang.org/x/text/unicode/norm"
 )
 
 func (s *knowledgeService) cloneKnowledge(
@@ -178,6 +179,7 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
+		p = norm.NFC.String(p)
 		if p == "" {
 			continue
 		}
@@ -4032,6 +4034,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		passageChunks := make([]types.ParsedChunk, 0, len(payload.Passages))
 		start, end := 0, 0
 		for i, p := range payload.Passages {
+			p = norm.NFC.String(p)
 			if p == "" {
 				continue
 			}
@@ -4214,6 +4217,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	var sourceIndex *sourceloc.Index
 	if convertResult != nil {
+		// Normalize after parser-output rewrites (including HTML entity decoding)
+		// so source mapping, offsets and parent/child chunks share the NFC text.
+		convertResult.MarkdownContent = norm.NFC.String(convertResult.MarkdownContent)
 		sourceIndex = buildSourceIndex(parsedMarkdown, sourceBlocks, convertResult.MarkdownContent, storedImages)
 	}
 

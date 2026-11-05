@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"math"
 	"slices"
@@ -90,7 +91,8 @@ func sortByScoreDesc(a, b *types.IndexWithScore) int {
 	} else if a.Score < b.Score {
 		return 1
 	}
-	return 0
+	// Map iteration must not change tied ranks or top-k membership between queries.
+	return cmp.Compare(a.ChunkID, b.ChunkID)
 }
 
 // deduplicateByScore deduplicates retrieval results by chunk ID, keeping the highest score

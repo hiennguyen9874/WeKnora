@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -13,7 +14,47 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
 )
+
+// Observe the query at the first pipeline stage, before rewriting or retrieval.
+type nfcQueryPlugin struct {
+	t    *testing.T
+	want string
+	seen bool
+}
+
+func (p *nfcQueryPlugin) ActivationEvents() []types.EventType {
+	return []types.EventType{types.QUERY_UNDERSTAND, types.CHUNK_SEARCH}
+}
+
+func (p *nfcQueryPlugin) OnEvent(
+	_ context.Context, _ types.EventType, cm *types.ChatManage, next func() *chatpipeline.PluginError,
+) *chatpipeline.PluginError {
+	p.seen = true
+	assert.Equal(p.t, p.want, cm.Query)
+	assert.Equal(p.t, p.want, cm.RewriteQuery)
+	return next()
+}
+
+func TestKnowledgeQAByEventNormalizesQueryBeforePlugins(t *testing.T) {
+	for _, query := range []string{"Điều 5 Khoản 2 quy định gì?", "plain ASCII", ""} {
+		for _, form := range []norm.Form{norm.NFC, norm.NFD} {
+			for _, first := range []types.EventType{types.QUERY_UNDERSTAND, types.CHUNK_SEARCH} {
+				cm := &types.ChatManage{
+					PipelineRequest: types.PipelineRequest{Query: form.String(query)},
+					PipelineState:   types.PipelineState{RewriteQuery: form.String(query)},
+				}
+				plugin := &nfcQueryPlugin{t: t, want: query}
+				events := chatpipeline.NewEventManager()
+				events.Register(plugin)
+				svc := &sessionService{eventManager: events}
+				require.NoError(t, svc.KnowledgeQAByEvent(context.Background(), cm, []types.EventType{first}))
+				require.True(t, plugin.seen)
+			}
+		}
+	}
+}
 
 type captureChatModel struct {
 	lastMessages []chat.Message

@@ -7,8 +7,10 @@ package sourceloc
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Remapper translates rune offsets in one version of a text to the matching
@@ -121,6 +123,9 @@ func RemapBlocks(blocks []types.SourceBlock, oldText, newText string) []types.So
 	if len(blocks) == 0 || oldText == newText {
 		return blocks
 	}
+	if norm.NFC.String(oldText) == newText {
+		return remapNFCBlocks(blocks, oldText)
+	}
 	// Re-align full block text after markup/URL rewrites. Proportional
 	// interpolation can manufacture a location for deleted or changed content.
 	oldRunes := []rune(oldText)
@@ -129,10 +134,46 @@ func RemapBlocks(blocks []types.SourceBlock, oldText, newText string) []types.So
 		if b.Start < 0 || b.End > len(oldRunes) || b.End <= b.Start {
 			continue
 		}
-		text := normalizeMarkdown(string(oldRunes[b.Start:b.End])).text
+		// Ingestion normalizes the rewritten markdown to NFC. Compose source
+		// text before projecting it, otherwise combining accents are discarded
+		// and the original file's citation locations cannot be re-aligned.
+		text := normalizeMarkdown(norm.NFC.String(string(oldRunes[b.Start:b.End]))).text
 		units = append(units, Unit{Text: text, Locator: b.Locator})
 	}
 	return Align(newText, units)
+}
+
+// remapNFCBlocks translates offsets without text matching: NFC only composes
+// canonical segments, so every complete source block retains its provenance.
+func remapNFCBlocks(blocks []types.SourceBlock, text string) []types.SourceBlock {
+	offsets := make([]int, utf8.RuneCountInString(text)+1)
+	var iter norm.Iter
+	iter.InitString(norm.NFC, text)
+	oldPos, newPos := 0, 0
+	for !iter.Done() {
+		start := iter.Pos()
+		segment := iter.Next()
+		oldEnd := oldPos + utf8.RuneCountInString(text[start:iter.Pos()])
+		// An endpoint inside a combining segment rounds down; it cannot
+		// claim an incomplete character as an exact source location.
+		for i := oldPos; i < oldEnd; i++ {
+			offsets[i] = newPos
+		}
+		newPos += utf8.RuneCount(segment)
+		offsets[oldEnd] = newPos
+		oldPos = oldEnd
+	}
+	result := make([]types.SourceBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Start < 0 || block.End >= len(offsets) || block.End <= block.Start {
+			continue
+		}
+		block.Start, block.End = offsets[block.Start], offsets[block.End]
+		if block.End > block.Start {
+			result = append(result, block)
+		}
+	}
+	return result
 }
 
 // splitLines returns each line's comparison key (without its line break or a
