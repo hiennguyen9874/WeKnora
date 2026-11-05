@@ -2,7 +2,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'embeddings') THEN
-        RAISE NOTICE '[Migration 000134 down] embeddings table does not exist · skipping';
+        RAISE NOTICE '[Migration 000137 down] embeddings table does not exist · skipping';
         RETURN;
     END IF;
 
@@ -17,5 +17,5 @@ BEGIN
             }
         }'
     );
-    RAISE NOTICE '[Migration 000134 down] Rebuilt embeddings_search_idx with the chinese_lindera tokenizer';
+    RAISE NOTICE '[Migration 000137 down] Rebuilt embeddings_search_idx with the chinese_lindera tokenizer';
 END $$;

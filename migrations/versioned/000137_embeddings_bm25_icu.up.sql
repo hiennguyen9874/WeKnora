@@ -1,4 +1,4 @@
--- Migration 000134: rebuild the BM25 index on embeddings.content with icu.
+-- Migration 000137: rebuild the BM25 index on embeddings.content with icu.
 --
 -- 000002 tokenizes content with chinese_lindera, which emits whitespace and
 -- punctuation as tokens for Vietnamese and uses a Chinese dictionary. icu
@@ -13,7 +13,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'embeddings') THEN
-        RAISE NOTICE '[Migration 000134] embeddings table does not exist · skipping';
+        RAISE NOTICE '[Migration 000137] embeddings table does not exist · skipping';
         RETURN;
     END IF;
 
@@ -28,5 +28,5 @@ BEGIN
             }
         }'
     );
-    RAISE NOTICE '[Migration 000134] Rebuilt embeddings_search_idx with the icu tokenizer';
+    RAISE NOTICE '[Migration 000137] Rebuilt embeddings_search_idx with the icu tokenizer';
 END $$;

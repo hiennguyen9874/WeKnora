@@ -12,7 +12,7 @@ import (
 
 // bm25TokenizerMigration rebuilds embeddings_search_idx with the icu tokenizer
 // for Vietnamese; its down migration restores chinese_lindera from 000002.
-const bm25TokenizerMigration = 134
+const bm25TokenizerMigration = 137
 
 // TestPostgresBM25TokenizerMigration runs the versioned migrations against a
 // real ParadeDB; see TestPostgresMigrationsServeAgentHistory for how to start
