@@ -5,6 +5,7 @@
 package chunker
 
 import (
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -238,10 +239,19 @@ func findHeadingBoundaries(text string, primaryLevel int) []headingBoundary {
 
 	pos := 0
 	var fence markdownFence
+	var hierarchy HeadingHierarchy
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if code, _ := fence.consume(line); !code {
-			if level, _ := parseHeading(line); level > 0 {
+			if level, heading := hierarchy.Observe(line); level > 0 {
+				if AllCapsHeadingPattern.MatchString(strings.TrimSpace(line)) && heading != strings.TrimSpace(line) {
+					// The title continues the preceding legal marker, not a new section.
+					last := &bounds[len(bounds)-1]
+					if vietnameseLegalLevel(last.line) == level {
+						last.line = strings.Repeat("#", level) + " " + heading
+					}
+					level = 0
+				}
 				if level >= 1 && level <= primaryLevel && pos > 0 {
 					bounds = append(bounds, headingBoundary{
 						runeStart: pos,
@@ -276,8 +286,11 @@ func observeSubHeadings(runes []rune, primaryLevel int, h *HeadingHierarchy) {
 		if code, _ := fence.consume(line); code {
 			continue
 		}
-		if level, _ := parseHeading(line); level > primaryLevel {
-			h.Observe(line)
+		next := *h
+		level, heading := next.Observe(line)
+		continuedTitle := AllCapsHeadingPattern.MatchString(strings.TrimSpace(line)) && heading != strings.TrimSpace(line)
+		if level > primaryLevel || (level > 0 && continuedTitle) {
+			*h = next
 		}
 	}
 }
@@ -304,8 +317,11 @@ func sectionBreadcrumbs(sectionRunes []rune, primaryLevel int, seed HeadingHiera
 	lines := strings.Split(string(sectionRunes), "\n")
 	for i, line := range lines {
 		if code, _ := fence.consume(line); !code {
-			if level, _ := parseHeading(line); level > primaryLevel {
-				h.Observe(line)
+			next := h
+			level, heading := next.Observe(line)
+			continuedTitle := AllCapsHeadingPattern.MatchString(strings.TrimSpace(line)) && heading != strings.TrimSpace(line)
+			if level > primaryLevel || (level > 0 && continuedTitle) {
+				h = next
 				result = append(result, sectionBreadcrumb{
 					runeStart:  pos,
 					breadcrumb: h.BreadcrumbWithHashes(),
@@ -324,12 +340,9 @@ func sectionBreadcrumbs(sectionRunes []rune, primaryLevel int, seed HeadingHiera
 // — the last entry whose runeStart <= offset. fallback covers the (unreachable
 // in practice) empty-slice case.
 func breadcrumbAtOffset(bcs []sectionBreadcrumb, offset int, fallback string) string {
-	bc := fallback
-	for _, e := range bcs {
-		if e.runeStart > offset {
-			break
-		}
-		bc = e.breadcrumb
+	i := sort.Search(len(bcs), func(i int) bool { return bcs[i].runeStart > offset })
+	if i == 0 {
+		return fallback
 	}
-	return bc
+	return bcs[i-1].breadcrumb
 }

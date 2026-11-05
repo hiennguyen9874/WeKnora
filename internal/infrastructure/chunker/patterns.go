@@ -75,14 +75,14 @@ var ChineseChapterPattern = regexp.MustCompile(`(?m)^[ \t]*第[ \t]*[一二三�
 
 // VietnameseChapterPattern matches Vietnamese legal structure markers: Phần,
 // Chương or Mục with a Roman or Arabic numeral, followed by ".", ":", an
-// upper-case title or end of line; and Điều with an Arabic number ("Điều
-// 11a.") followed by a dot. An opening quote marks a quoted amendment
+// upper-case title or end of line; and Điều with a Roman or Arabic number
+// (including "Điều 11a.") followed by a dot. An opening quote marks a quoted amendment
 // ("“Điều 4. ..."). A Markdown heading prefix is allowed. Body text that
 // cites a marker ("Điều 37 của Thông tư", "Chương II của Luật này") and Khoản
 // lines ("1. ...") do not match. Submatches: (1) opening quote, (2) Phần /
 // Chương / Mục, (3) Điều. Article titles can run to several hundred
 // characters, hence the long tail.
-var VietnameseChapterPattern = regexp.MustCompile(`(?m)^[ \t]*(?:#{1,6}[ \t]+)?([“"]?)(?:(Phần|PHẦN|Chương|CHƯƠNG|Mục|MỤC)[ \t]+(?:[0-9]+|[IVXLC]{1,7})(?:[.:]|[ \t]+[A-Z` + vietnameseUpper + `]|[ \t]*$)|(Điều|ĐIỀU)[ \t]+[0-9]+[a-zđ]?\.).{0,1000}$`)
+var VietnameseChapterPattern = regexp.MustCompile(`(?m)^[ \t]*(?:#{1,6}[ \t]+)?([“"]?)(?:(Phần|PHẦN|Chương|CHƯƠNG|Mục|MỤC)[ \t]+(?:[0-9]+|[IVXLC]{1,7})(?:[.:]|[ \t]+[A-Z` + vietnameseUpper + `]|[ \t]*$)|(Điều|ĐIỀU)[ \t]+(?:[0-9]+[a-zđ]?|[IVXLC]{1,7})\.).{0,1000}$`)
 
 // vietnameseLegalLevel returns the heading level of a Vietnamese legal marker
 // line: Phần 1, Chương 2, Mục 3, Điều 4, and 5 for a quoted amendment so it
@@ -110,8 +110,9 @@ func vietnameseLegalLevel(line string) int {
 // line is not a heading. ATX Markdown headings use their hash count, except
 // that Vietnamese legal markers always take their legal level: OCR emits
 // Chương and Điều at the same `##` depth, or as plain lines, so the hash count
-// cannot express Chương > Mục > Điều. The marker words are Vietnamese-only,
-// so this needs no language hint.
+// cannot express Chương > Mục > Điều. Plain accented Vietnamese all-caps
+// titles default to level 1; HeadingHierarchy attaches a title following a
+// bare legal marker to that marker instead. This needs no language hint.
 func parseHeading(line string) (int, string) {
 	level, text := 0, strings.TrimSpace(line)
 	if m := MarkdownHeadingPattern.FindStringSubmatch(line); m != nil {
@@ -119,6 +120,9 @@ func parseHeading(line string) (int, string) {
 	}
 	if l := vietnameseLegalLevel(text); l > 0 {
 		return l, text
+	}
+	if level == 0 && AllCapsHeadingPattern.MatchString(text) && strings.ContainsAny(text, vietnameseUpper) {
+		level = 1
 	}
 	if level == 0 {
 		return 0, ""

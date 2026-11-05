@@ -102,6 +102,7 @@ func ProfileDocument(text string) *DocProfile {
 	// First pass: per-line markers and length stats
 	var lengths []float64
 	var fence markdownFence
+	var hierarchy HeadingHierarchy
 	codeChars := 0
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -117,7 +118,8 @@ func ProfileDocument(text string) *DocProfile {
 		runeLen := len([]rune(line))
 		lengths = append(lengths, float64(runeLen))
 
-		if matchHeading(line, &p.MdHeadingCounts) {
+		if level, _ := hierarchy.Observe(line); level > 0 {
+			p.MdHeadingCounts[level]++
 			p.MdHeadingTotal++
 			continue
 		}
@@ -182,17 +184,6 @@ func ProfileDocument(text string) *DocProfile {
 	}
 
 	return p
-}
-
-// matchHeading checks whether line is a heading (see parseHeading) and
-// increments the appropriate level counter when so. Returns true on match.
-func matchHeading(line string, counts *map[int]int) bool {
-	level, _ := parseHeading(line)
-	if level < 1 || level > 6 {
-		return false
-	}
-	(*counts)[level]++
-	return true
 }
 
 // StrategyTier identifies which chunking implementation should run.

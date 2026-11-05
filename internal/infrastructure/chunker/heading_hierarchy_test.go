@@ -67,6 +67,29 @@ func TestHeadingHierarchy_EmptyState(t *testing.T) {
 	}
 }
 
+func TestHeadingHierarchy_VietnameseTitles(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"standalone", []string{"NHỮNG QUY ĐỊNH CHUNG", "Điều IV. Phạm vi"}, "NHỮNG QUY ĐỊNH CHUNG > Điều IV. Phạm vi"},
+		{"chapter and section", []string{"Chương II", "NHỮNG QUY ĐỊNH CHUNG", "Mục 1", "ĐỐI TƯỢNG ÁP DỤNG", "Điều IV. Phạm vi"}, "Chương II NHỮNG QUY ĐỊNH CHUNG > Mục 1 ĐỐI TƯỢNG ÁP DỤNG > Điều IV. Phạm vi"},
+		{"new chapter", []string{"Chương I", "NHỮNG QUY ĐỊNH CHUNG", "Chương II", "ĐIỀU KHOẢN THI HÀNH", "Điều V. Hiệu lực"}, "Chương II ĐIỀU KHOẢN THI HÀNH > Điều V. Hiệu lực"},
+		{"existing title", []string{"Chương I. NHỮNG QUY ĐỊNH CHUNG", "ĐIỀU KHOẢN THI HÀNH"}, "ĐIỀU KHOẢN THI HÀNH"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHeadingHierarchy()
+			for _, line := range tc.lines {
+				h.Observe(line)
+			}
+			if got := h.Breadcrumb(); got != tc.want {
+				t.Errorf("breadcrumb = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHeadingHierarchy_Reset(t *testing.T) {
 	h := NewHeadingHierarchy()
 	h.Observe("# A")

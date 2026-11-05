@@ -162,16 +162,17 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 		return ParentChildResult{}, diag
 	}
 
+	// Resolve context against the whole source: heuristic parents may start
+	// below a heading and therefore cannot reconstruct their ancestors alone.
+	crumbs := sectionBreadcrumbs([]rune(text), 0, HeadingHierarchy{})
 	var newParents []Chunk
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := Split(parent.Content, childCfg)
-		crumbs := parentContentBreadcrumbs(parent)
+		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
 		for i := range subs {
 			subs[i].ContextHeader = breadcrumbAtOffset(crumbs, subs[i].Start, parent.ContextHeader)
 		}
-		subs = mapChildrenToSource(parent, subs)
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -252,20 +253,6 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		Languages:    base.Languages,
 	}
 	return
-}
-
-// parentContentBreadcrumbs returns, for every heading inside the parent's
-// content, the breadcrumb in effect from that heading on, seeded with the
-// parent's own breadcrumb. A child's breadcrumb is the one in effect at its
-// start: a parent that coalesced several short sections (e.g. Điều 1 and
-// Điều 2 under one Chương) only carries their common prefix, but each child
-// still names the section it sits in.
-func parentContentBreadcrumbs(parent Chunk) []sectionBreadcrumb {
-	var seed HeadingHierarchy
-	for _, line := range strings.Split(parent.ContextHeader, "\n") {
-		seed.Observe(line)
-	}
-	return sectionBreadcrumbs([]rune(parent.Content), 0, seed)
 }
 
 // resolveChainWithProfile returns the strategy chain to attempt and, when

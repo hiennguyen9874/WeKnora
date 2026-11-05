@@ -385,6 +385,54 @@ var vietnameseLawDoc = "## NGHỊ ĐỊNH\nVề quản lý hoạt động kinh d
 	"1. Ngân hàng Nhà nước cấp giấy phép xuất khẩu, nhập khẩu vàng nguyên liệu cho doanh nghiệp sản xuất vàng trang sức, mỹ nghệ.\n" +
 	"2. Doanh nghiệp xuất khẩu vàng nguyên liệu phải đáp ứng các điều kiện theo quy định của pháp luật. MARKER_D4 thuộc Điều 4.\n"
 
+func TestSplitParentChild_VietnameseStandaloneTitles(t *testing.T) {
+	for _, strategy := range []string{StrategyAuto, StrategyHeading, StrategyHeuristic} {
+		t.Run(strategy, func(t *testing.T) {
+			longHeading := "Điều IV. Phạm vi áp dụng " + strings.Repeat("của văn bản pháp luật ", 10)
+			text := "Chương I\nNHỮNG QUY ĐỊNH CHUNG\n\nMục 1\nĐỐI TƯỢNG ÁP DỤNG\n\n" +
+				longHeading + "\n" + strings.Repeat("Nội dung của điều luật. ", 40) + "MARKER_IV\n\n" +
+				"Chương II\nĐIỀU KHOẢN THI HÀNH\n\nĐiều V. Hiệu lực\n" +
+				strings.Repeat("Quy định về hiệu lực. ", 40) + "MARKER_V\n"
+			base := NormalizeSplitterConfig(SplitterConfig{Strategy: strategy, Languages: []string{LangVietnamese}})
+			parent, child := DeriveParentChildConfigs(base, 700, 200)
+			result := SplitParentChild(text, parent, child)
+			wholeHeading := false
+			for _, c := range result.Children {
+				wholeHeading = wholeHeading || strings.Contains(c.Content, longHeading)
+				if c.End-c.Start != utf8.RuneCountInString(c.Content) {
+					t.Errorf("invalid source offsets for child %d", c.Seq)
+				}
+			}
+			if !wholeHeading {
+				t.Error("Roman-numbered heading was split")
+			}
+			for marker, headings := range map[string][]string{
+				"MARKER_IV": {"Chương I", "NHỮNG QUY ĐỊNH CHUNG", "Mục 1", "ĐỐI TƯỢNG ÁP DỤNG", "Điều IV. Phạm vi áp dụng"},
+				"MARKER_V":  {"Chương II", "ĐIỀU KHOẢN THI HÀNH", "Điều V. Hiệu lực"},
+			} {
+				found := false
+				for _, c := range result.Children {
+					if !strings.Contains(c.Content, marker) {
+						continue
+					}
+					found = true
+					for _, heading := range headings {
+						if !strings.Contains(c.ContextHeader, heading) {
+							t.Errorf("%s breadcrumb lacks %q: %s", marker, heading, c.ContextHeader)
+						}
+					}
+					if marker == "MARKER_V" && strings.Contains(c.ContextHeader, "NHỮNG QUY ĐỊNH CHUNG") {
+						t.Errorf("stale chapter title: %s", c.ContextHeader)
+					}
+				}
+				if !found {
+					t.Errorf("missing %s", marker)
+				}
+			}
+		})
+	}
+}
+
 // TestSplitParentChild_VietnameseLegalStructure runs the ingestion path
 // (auto strategy, parent-child) on a Vietnamese decree. Parents must start at
 // a Chương/Mục/Điều boundary, never at a Khoản; every child carries its

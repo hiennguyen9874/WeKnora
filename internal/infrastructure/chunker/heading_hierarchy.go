@@ -33,6 +33,15 @@ func NewHeadingHierarchy() *HeadingHierarchy {
 // content to Observe (the heading splitter does so).
 func (h *HeadingHierarchy) Observe(line string) (int, string) {
 	level, heading := parseHeading(line)
+	// OCR often puts a legal marker and its uppercase title on separate
+	// lines. Keep the title at the marker's level so an ensuing Điều does
+	// not discard it or lose the enclosing Chương/Mục.
+	if AllCapsHeadingPattern.MatchString(strings.TrimSpace(line)) && h.depth > 0 {
+		marker := h.stack[h.depth-1]
+		if legalLevel := vietnameseLegalLevel(marker); legalLevel > 0 && legalLevel <= 3 && len(strings.Fields(marker)) == 2 {
+			level, heading = h.depth, marker+" "+strings.TrimSpace(line)
+		}
+	}
 	if level < 1 || level > 6 {
 		return 0, ""
 	}
